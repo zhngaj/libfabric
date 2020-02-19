@@ -41,6 +41,7 @@ struct fi_info *shm_info;
 
 struct fi_provider *lower_efa_prov;
 struct efa_ep_addr *local_efa_addr;
+int efa_cma_cap = 1;
 
 
 struct rxr_env rxr_env = {
@@ -581,11 +582,11 @@ static void rxr_check_cma_capability(void)
 		// parent waits child to exit, and check flag bit
 		wait(NULL);
 		if (flag == 0) {
-			fprintf(stderr, "SHM transfer will be disabled because of ptrace protection.\n"
-				"To enable SHM transfer, please refer to the man page fi_efa.7 for more information.\n"
-				"Also note that turning off ptrace protection has security implications. If you cannot\n"
-				"turn it off, you can suppress this message by setting FI_EFA_ENABLE_SHM_TRANSFER=0\n");
-			rxr_env.enable_shm_transfer = 0;
+			fprintf(stderr, "shm transfer will fallback to mmap-based solution as CMA\n"
+				"is not available, which could lead to performance degradation.\n"
+				"To enable CMA-based shm transfer, you can turn off ptrace protection.\n"
+				"Please note that turning off ptrace protection has security implications.\n");
+			efa_cma_cap = 0;
 		}
 	}
 }

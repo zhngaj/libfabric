@@ -188,6 +188,7 @@ static inline void rxr_poison_mem_region(uint32_t *ptr, size_t size)
 #define RXR_SHM_HDR_DATA	BIT_ULL(11)
 
 extern struct fi_info *shm_info;
+extern int efa_cma_cap;
 
 extern struct fi_provider *lower_efa_prov;
 extern struct fi_provider rxr_prov;
@@ -825,7 +826,7 @@ int rxr_ep_set_tx_credit_request(struct rxr_ep *rxr_ep,
 				 struct rxr_tx_entry *tx_entry);
 
 void rxr_inline_mr_reg(struct rxr_domain *rxr_domain,
-		       struct rxr_tx_entry *tx_entry);
+		       struct rxr_tx_entry *tx_entry, bool is_shm);
 
 struct rxr_rx_entry *rxr_ep_alloc_unexp_rx_entry_for_rts(struct rxr_ep *ep,
 							 struct rxr_pkt_entry *pkt_entry);

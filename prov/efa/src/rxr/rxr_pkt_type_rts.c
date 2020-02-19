@@ -211,6 +211,7 @@ ssize_t rxr_pkt_init_rts(struct rxr_ep *ep,
 	char *data, *src;
 	uint64_t data_len;
 	size_t mtu = ep->mtu_size;
+	int i;
 
 	if (tx_entry->op == ofi_op_read_req)
 		return rxr_pkt_init_read_rts(ep, tx_entry, pkt_entry);
@@ -236,11 +237,21 @@ ssize_t rxr_pkt_init_rts(struct rxr_ep *ep,
 			/* rendezvous protocol
 			 * place iov_count first, then local iov
 			 */
-			memcpy(data, &tx_entry->iov_count, sizeof(size_t));
+			if (!efa_cma_cap)
+				rxr_inline_mr_reg(rxr_ep_domain(ep), tx_entry, 1);
+
+			tx_entry->rma_iov_count = tx_entry->iov_count;
+			for (i = 0; i < tx_entry->rma_iov_count; i++) {
+				tx_entry->rma_iov[i].addr = (intptr_t) tx_entry->iov[i].iov_base;
+				tx_entry->rma_iov[i].len = tx_entry->iov[i].iov_len;
+				tx_entry->rma_iov[i].key = efa_cma_cap ? 0 : tx_entry->mr[i]->key;
+			}
+
+			memcpy(data, &tx_entry->rma_iov_count, sizeof(size_t));
 			data += sizeof(size_t);
 			pkt_entry->pkt_size += sizeof(size_t);
-			memcpy(data, tx_entry->iov, sizeof(struct iovec) * tx_entry->iov_count);
-			pkt_entry->pkt_size += sizeof(struct iovec) * tx_entry->iov_count;
+			memcpy(data, tx_entry->rma_iov, sizeof(struct fi_rma_iov) * tx_entry->rma_iov_count);
+			pkt_entry->pkt_size += sizeof(struct fi_rma_iov) * tx_entry->rma_iov_count;
 		}
 	} else {
 		/* will be sent over efa provider */
@@ -285,7 +296,7 @@ void rxr_pkt_handle_rts_sent(struct rxr_ep *ep, struct rxr_pkt_entry *pkt_entry)
 	 * provide a descriptor with the tx op
 	 */
 	if (rxr_ep_mr_local(ep) && !tx_entry->desc[0])
-		rxr_inline_mr_reg(rxr_ep_domain(ep), tx_entry);
+		rxr_inline_mr_reg(rxr_ep_domain(ep), tx_entry, 0);
 }
 
 void rxr_pkt_handle_rts_send_completion(struct rxr_ep *ep, struct rxr_pkt_entry *pkt_entry)
@@ -482,10 +493,8 @@ void rxr_pkt_proc_shm_long_msg_rts(struct rxr_ep *ep,
 				   struct rxr_rx_entry *rx_entry,
 				   char *data)
 {
-	struct iovec *iovec_ptr;
 	struct rxr_read_entry *read_entry;
-	int err, i;
-
+	int err;
 
 	/* rx_entry->cq_entry.len is total recv buffer size.
 	 * rx_entry->total_len is from rts_hdr and is total send buffer size.
@@ -499,13 +508,7 @@ void rxr_pkt_proc_shm_long_msg_rts(struct rxr_ep *ep,
 	memcpy(&rx_entry->rma_iov_count, data, sizeof(size_t));
 	data += sizeof(size_t);
 
-	iovec_ptr = (struct iovec *)data;
-	for (i = 0; i < rx_entry->rma_iov_count; i++) {
-		iovec_ptr = iovec_ptr + i;
-		rx_entry->rma_iov[i].addr = (intptr_t) iovec_ptr->iov_base;
-		rx_entry->rma_iov[i].len = iovec_ptr->iov_len;
-		rx_entry->rma_iov[i].key = 0;
-	}
+	memcpy(rx_entry->rma_iov, data, sizeof(struct fi_rma_iov) * rx_entry->rma_iov_count);
 
 	read_entry = rxr_read_alloc_entry(ep, RXR_RX_ENTRY, rx_entry,
 					  SHM_EP);

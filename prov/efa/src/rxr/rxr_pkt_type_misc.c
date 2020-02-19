@@ -271,7 +271,7 @@ void rxr_pkt_handle_readrsp_sent(struct rxr_ep *ep, struct rxr_pkt_entry *pkt_en
 	assert(tx_entry->window >= 0);
 	if (tx_entry->bytes_sent < tx_entry->total_len) {
 		if (efa_mr_cache_enable && rxr_ep_mr_local(ep))
-			rxr_inline_mr_reg(rxr_ep_domain(ep), tx_entry);
+			rxr_inline_mr_reg(rxr_ep_domain(ep), tx_entry, 0);
 
 		tx_entry->state = RXR_TX_SEND;
 		dlist_insert_tail(&tx_entry->entry,
@@ -490,11 +490,23 @@ void rxr_pkt_handle_eor_recv(struct rxr_ep *ep,
 {
 	struct rxr_eor_hdr *shm_eor;
 	struct rxr_tx_entry *tx_entry;
+	int i, ret;
 
 	shm_eor = (struct rxr_eor_hdr *)pkt_entry->pkt;
 
 	/* pre-post buf used here, so can NOT track back to tx_entry with x_entry */
 	tx_entry = ofi_bufpool_get_ibuf(ep->tx_entry_pool, shm_eor->tx_id);
+	if (!efa_cma_cap) {
+		for (i = 0; i < tx_entry->rma_iov_count; i++) {
+			if (tx_entry->mr[i]) {
+				ret = fi_close(&tx_entry->mr[i]->fid);
+				if (ret) {
+					FI_WARN(&rxr_prov, FI_LOG_CQ,
+						"Failed to close mr when handing eor\n");
+				}
+			}
+		}
+	}
 	rxr_cq_write_tx_completion(ep, tx_entry);
 	rxr_pkt_entry_release_rx(ep, pkt_entry);
 }

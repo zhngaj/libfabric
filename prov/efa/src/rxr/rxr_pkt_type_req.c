@@ -79,7 +79,6 @@ void rxr_pkt_init_req_hdr(struct rxr_ep *ep,
 			  int pkt_type,
 			  struct rxr_pkt_entry *pkt_entry)
 {
-	int i;
 	char *opt_hdr;
 	struct rxr_peer *peer;
 	struct rxr_base_hdr *base_hdr;
@@ -308,7 +307,7 @@ void rxr_pkt_handle_long_rtm_sent(struct rxr_ep *ep,
 	assert(tx_entry->bytes_sent < tx_entry->total_len);
 
 	if (efa_mr_cache_enable && !tx_entry->desc[0])
-		rxr_inline_mr_reg(rxr_ep_domain(ep), tx_entry);
+		rxr_inline_mr_reg(rxr_ep_domain(ep), tx_entry, 0);
 }
 
 /*

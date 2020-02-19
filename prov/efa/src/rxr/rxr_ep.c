@@ -506,12 +506,26 @@ struct rxr_tx_entry *rxr_ep_alloc_tx_entry(struct rxr_ep *rxr_ep,
 }
 
 void rxr_inline_mr_reg(struct rxr_domain *rxr_domain,
-		       struct rxr_tx_entry *tx_entry)
+		       struct rxr_tx_entry *tx_entry, bool is_shm)
 {
 	ssize_t ret;
 	size_t offset;
-	int index;
+	int index = 0;
 
+	if (is_shm) {
+		tx_entry->iov_mr_start = index;
+		while (index < tx_entry->iov_count) {
+			ret = fi_mr_reg(&rxr_domain->util_domain.domain_fid,
+					tx_entry->iov[index].iov_base,
+					tx_entry->iov[index].iov_len,
+					FI_REMOTE_READ, 0, 0, 0,
+					&tx_entry->mr[index], NULL);
+			if (ret)
+				tx_entry->mr[index] = NULL;
+			index++;
+		}
+		return;
+	}
 	/* Set the iov index and iov offset from bytes sent */
 	offset = tx_entry->bytes_sent;
 	for (index = 0; index < tx_entry->iov_count; ++index) {

@@ -94,6 +94,8 @@ static int rxr_mr_close(fid_t fid)
 {
 	struct rxr_domain *rxr_domain;
 	struct rxr_mr *rxr_mr;
+	struct efa_mem_desc *mr_desc;
+	struct util_domain *shm_util_domain;
 	int ret;
 
 	rxr_mr = container_of(fid, struct rxr_mr, mr_fid.fid);
@@ -111,13 +113,40 @@ static int rxr_mr_close(fid_t fid)
 		FI_WARN(&rxr_prov, FI_LOG_MR,
 			"Unable to close MR\n");
 
-	if (rxr_env.enable_shm_transfer && rxr_mr->shm_msg_mr
-	    && rxr_mr->peer.iface == FI_HMEM_SYSTEM) {
-		ret = fi_close(&rxr_mr->shm_msg_mr->fid);
-		if (ret)
-			FI_WARN(&rxr_prov, FI_LOG_MR,
-				"Unable to close shm MR\n");
+	mr_desc = container_of(&rxr_mr->msg_mr->fid, struct efa_mem_desc, mr_fid.fid);
+
+	if (rxr_env.enable_shm_transfer && rxr_mr->peer.iface == FI_HMEM_SYSTEM) {
+		/*
+		 * If MR cache enabled, only close shm's mr when use_cnt is 0,
+		 * which ensures that no subsequent RMA operations is using this mr.
+		 * We further check rxr_mr->shm_msg_mr to see if shm's memory
+		 * registration is skipped or not.
+		 */
+		if (!efa_mr_cache_enable || (efa_mr_cache_enable && !mr_desc->entry->use_cnt
+					     && rxr_mr->shm_msg_mr)) {
+			ret = fi_close(&rxr_mr->shm_msg_mr->fid);
+			if (ret)
+				FI_WARN(&rxr_prov, FI_LOG_MR,
+					"Unable to close shm MR\n");
+		} else if (efa_mr_cache_enable && !mr_desc->entry->use_cnt) {
+			/*
+			 * In rxr_mr_regattr, if key already exists, shm's memory
+			 * registration will be skipped (rxr_mr->shm_msg_mr is NULL).
+			 * Only remove shm's key in this case
+			 */
+			shm_util_domain = container_of(&rxr_domain->shm_domain->fid,
+						       struct util_domain, domain_fid.fid);
+			fastlock_acquire(&shm_util_domain->lock);
+			ret = ofi_mr_map_remove(&shm_util_domain->mr_map,
+						rxr_mr->mr_fid.key);
+			fastlock_release(&shm_util_domain->lock);
+			if (ret)
+				FI_WARN(&rxr_prov, FI_LOG_MR,
+					"shm's mr_map remove failed\n");
+			ofi_atomic_dec32(&shm_util_domain->ref);
+		}
 	}
+
 	free(rxr_mr);
 	return ret;
 }
