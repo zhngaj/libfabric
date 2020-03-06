@@ -181,6 +181,8 @@ struct smr_region {
 	uint8_t		resv;
 	uint16_t	flags;
 	int		pid;
+	int		cma_cap;
+	void		*base_addr;
 	fastlock_t	lock; /* lock for shm access
 				 Must hold smr->lock before tx/rx cq locks
 				 in order to progress or post recv */
@@ -257,6 +259,7 @@ struct smr_attr {
 	size_t		tx_count;
 };
 
+void	smr_cma_check(struct smr_region *region, struct smr_region *peer_region);
 void	smr_cleanup(void);
 int	smr_map_create(const struct fi_provider *prov, int peer_count,
 		       struct smr_map **map);
