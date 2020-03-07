@@ -319,6 +319,88 @@ void smr_format_iov(struct smr_cmd *cmd, fi_addr_t peer_id,
 	smr_post_pend_resp(pend, cmd, context, iov, count, resp);
 }
 
+void smr_format_mmap(struct smr_cmd *cmd, fi_addr_t peer_id,
+		     const struct iovec *iov, size_t count, size_t total_len,
+		     uint32_t op, uint64_t tag, uint64_t data, uint64_t op_flags,
+		     void *context, struct smr_region *smr, uint64_t msg_id,
+		     struct smr_ep_name *map_name,
+		     struct smr_resp *resp, struct smr_tx_entry *pend)
+{
+	smr_generic_format(cmd, peer_id, op, tag, 0, 0, data, op_flags);
+	cmd->msg.hdr.op_src = smr_src_mmap;
+	cmd->msg.hdr.msg_id = msg_id;
+	cmd->msg.hdr.src_data = (uintptr_t) ((char **) resp - (char **) smr);
+	cmd->msg.hdr.size = total_len;
+
+	smr_post_pend_resp(pend, cmd, context, iov, count, resp);
+
+	pend->map_name = map_name;
+}
+
+int smr_iov_mmap_copy_in(struct smr_ep *ep, struct smr_region *peer_smr,
+			 const struct iovec *iov, size_t count,
+			 size_t total_len, uint32_t op, uint64_t msg_id,
+			 struct smr_ep_name **map_name)
+{
+	char peer_name[NAME_MAX];
+	char shm_name[NAME_MAX];
+	void *mapped_ptr;
+	int fd, ret, num;
+
+	sprintf(peer_name, "%s", (char *)peer_smr + peer_smr->name_offset);
+	num = sprintf(shm_name, "%s_%s_%ld", ep->name, peer_name, msg_id);
+	if (num < 0) {
+		FI_WARN(&smr_prov, FI_LOG_AV, "generating shm file name failed\n");
+		goto err1;
+	}
+	assert(num <= NAME_MAX);
+
+	fd = shm_open(shm_name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+	if (fd < 0) {
+		FI_WARN(&smr_prov, FI_LOG_EP_CTRL, "shm_open error\n");
+		goto err1;
+	}
+
+	*map_name = calloc(1, sizeof(struct smr_ep_name));
+	if (!map_name) {
+		FI_WARN(&smr_prov, FI_LOG_EP_CTRL, "calloc error\n");
+		return -FI_ENOMEM;
+	}
+	strncpy((*map_name)->name, shm_name, NAME_MAX - 1);
+	dlist_insert_tail(&(*map_name)->entry, &ep_name_list);
+
+	ret = ftruncate(fd, total_len);
+	if (ret < 0) {
+		FI_WARN(&smr_prov, FI_LOG_EP_CTRL, "ftruncate error\n");
+		goto err2;
+	}
+
+	mapped_ptr = mmap(NULL, total_len, PROT_READ | PROT_WRITE,
+			  MAP_SHARED, fd, 0);
+	if (mapped_ptr == MAP_FAILED) {
+		FI_WARN(&smr_prov, FI_LOG_EP_CTRL, "mmap error\n");
+		goto err2;
+	}
+
+	num = ofi_copy_from_iov(mapped_ptr, total_len, iov, count, 0);
+	if (num != total_len) {
+		FI_WARN(&smr_prov, FI_LOG_EP_CTRL, "copy from iov error\n");
+		goto err2;
+	}
+
+	munmap(mapped_ptr, total_len);
+	close(fd);
+	return 0;
+
+err2:
+	dlist_remove(&(*map_name)->entry);
+	free(*map_name);
+	shm_unlink(shm_name);
+	close(fd);
+err1:
+	return -errno;
+}
+
 static int smr_ep_close(struct fid *fid)
 {
 	struct smr_ep *ep;
