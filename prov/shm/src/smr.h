@@ -115,6 +115,7 @@ struct smr_tx_entry {
 	void		*context;
 	struct iovec	iov[SMR_IOV_LIMIT];
 	uint32_t	iov_count;
+	void		*map_ptr;
 	struct smr_ep_name *map_name;
 };
 
@@ -240,7 +241,7 @@ void smr_format_mmap(struct smr_cmd *cmd, fi_addr_t peer_id,
 		const struct iovec *iov, size_t count, size_t total_len,
 		uint32_t op, uint64_t tag, uint64_t data, uint64_t op_flags,
 		void *context, struct smr_region *smr, uint64_t msg_id,
-		struct smr_ep_name *map_name,
+		struct smr_ep_name *map_name, void *shm_ptr,
 		struct smr_resp *resp, struct smr_tx_entry *pend);
 
 int smr_complete_tx(struct smr_ep *ep, void *context, uint32_t op,
@@ -276,6 +277,6 @@ int smr_progress_unexp_queue(struct smr_ep *ep,
 int smr_iov_mmap_copy_in(struct smr_ep *ep, struct smr_region *peer_smr,
 		const struct iovec *iov, size_t count,
 		size_t total_len, uint32_t op, uint64_t msg_id,
-		struct smr_ep_name **map_name);
+		struct smr_ep_name **map_name, void **shm_ptr);
 
 #endif

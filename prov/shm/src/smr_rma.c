@@ -109,10 +109,13 @@ ssize_t smr_generic_rma(struct smr_ep *ep, const struct iovec *iov,
 	struct smr_resp *resp;
 	struct smr_cmd *cmd;
 	struct smr_tx_entry *pend;
+	struct smr_ep_name *map_name = NULL;
+	void *shm_ptr = NULL;
 	int peer_id, cmds, err = 0, comp = 1;
 	uint16_t comp_flags;
 	ssize_t ret = 0;
 	size_t total_len;
+	uint64_t msg_id;
 
 	assert(iov_count <= SMR_IOV_LIMIT);
 	assert(rma_count <= SMR_IOV_LIMIT);
@@ -143,7 +146,7 @@ ssize_t smr_generic_rma(struct smr_ep *ep, const struct iovec *iov,
 
 	cmd = ofi_cirque_tail(smr_cmd_queue(peer_smr));
 
-	if (cmds == 1) {
+	if (cmds == 1 && ep->region->cma_cap) {
 		err = smr_rma_fast(peer_smr, cmd, iov, iov_count, rma_iov,
 				   rma_count, desc, peer_id, context, op, op_flags);
 		comp_flags = cmd->msg.hdr.op_flags;
@@ -160,9 +163,30 @@ ssize_t smr_generic_rma(struct smr_ep *ep, const struct iovec *iov,
 		}
 		resp = ofi_cirque_tail(smr_resp_queue(ep->region));
 		pend = freestack_pop(ep->pend_fs);
-		smr_format_iov(cmd, smr_peer_addr(ep->region)[peer_id].addr,
-			       iov, iov_count, total_len, op, 0, data,
-			       op_flags, context, ep->region, resp, pend);
+		if (ep->region->cma_cap) {
+			smr_format_iov(cmd, smr_peer_addr(ep->region)[peer_id].addr,
+				       iov, iov_count, total_len, op, 0, data,
+				       op_flags, context, ep->region, resp, pend);
+		} else {
+			/*
+			 * mmap protocol
+			 * Once SAR protocol gets merged, we need set a threshold
+			 * for switching from SAR to mmap
+			 */
+			msg_id = (ep->msg_id)++;
+			ret = smr_iov_mmap_copy_in(ep, peer_smr, iov,
+						   iov_count, total_len, op, msg_id,
+						   &map_name, &shm_ptr);
+			if (ret) {
+				freestack_push(ep->pend_fs, pend);
+				ret = -FI_EAGAIN;
+				goto unlock_cq;
+			}
+			smr_format_mmap(cmd, smr_peer_addr(ep->region)[peer_id].addr,
+					iov, iov_count, total_len, op, 0, data,
+					op_flags, context, ep->region, msg_id,
+					map_name, shm_ptr, resp, pend);
+		}
 		ofi_cirque_commit(smr_resp_queue(ep->region));
 		comp = 0;
 	} else if (total_len > SMR_MSG_DATA_LEN) {

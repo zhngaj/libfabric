@@ -199,9 +199,14 @@ static ssize_t smr_generic_sendmsg(struct smr_ep *ep, const struct iovec *iov,
 				       iov_count, total_len, op, tag, data, op_flags,
 				       context, ep->region, resp, pend);
 		} else {
+			/*
+			 * mmap protocol
+			 * Once SAR protocol gets merged, we need set a threshold
+			 * for switching from SAR to mmap
+			 */
 			msg_id = (ep->msg_id)++;
 			ret = smr_iov_mmap_copy_in(ep, peer_smr, iov, iov_count,
-						   total_len, op, msg_id, &map_name);
+						   total_len, op, msg_id, &map_name, NULL);
 			if (ret) {
 				freestack_push(ep->pend_fs, pend);
 				ret = -FI_EAGAIN;
@@ -209,7 +214,8 @@ static ssize_t smr_generic_sendmsg(struct smr_ep *ep, const struct iovec *iov,
 			}
 			smr_format_mmap(cmd, smr_peer_addr(ep->region)[peer_id].addr, iov,
 					iov_count, total_len, op, tag, data, op_flags,
-					context, ep->region, msg_id, map_name, resp, pend);
+					context, ep->region, msg_id, map_name, NULL,
+					resp, pend);
 
 		}
 		ofi_cirque_commit(smr_resp_queue(ep->region));

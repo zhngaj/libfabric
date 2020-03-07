@@ -106,6 +106,14 @@ static void smr_progress_resp(struct smr_ep *ep)
 		}
 
 		if (!ep->region->cma_cap) {
+			// read data out of mmapped shm file
+			if (pending->cmd.msg.hdr.op == ofi_op_read_req) {
+				ret = ofi_copy_to_iov(pending->iov,
+						pending->iov_count, 0,
+						pending->map_ptr,
+						pending->cmd.msg.hdr.size);
+				munmap(pending->map_ptr, pending->cmd.msg.hdr.size);
+			}
 			if (pending->map_name) {
 				shm_unlink(pending->map_name->name);
 				dlist_remove(&pending->map_name->entry);
@@ -241,16 +249,29 @@ static int smr_mmap_iov_copy_out(struct smr_ep *ep, struct smr_cmd *cmd,
 		FI_WARN(&smr_prov, FI_LOG_AV, "mmap error %s\n", strerror(errno));
 		return errno;
 	}
-	ret = ofi_copy_to_iov(iov, iov_count, 0, mapped_ptr, cmd->msg.hdr.size);
-	if (ret != cmd->msg.hdr.size) {
-		FI_WARN(&smr_prov, FI_LOG_EP_CTRL,
-			"mmap iov copy out error\n");
-		return FI_EIO;
+	if (cmd->msg.hdr.op == ofi_op_read_req) {
+		*total_len = ofi_total_iov_len(iov, iov_count);
+		ret = ofi_copy_from_iov(mapped_ptr, *total_len, iov, iov_count, 0);
+		if (ret != *total_len) {
+			FI_WARN(&smr_prov, FI_LOG_EP_CTRL,
+				"mmap iov copy in error\n");
+			return FI_EIO;
+		}
+	} else {
+		ret = ofi_copy_to_iov(iov, iov_count, 0, mapped_ptr,
+				      cmd->msg.hdr.size);
+		if (ret != cmd->msg.hdr.size) {
+			FI_WARN(&smr_prov, FI_LOG_EP_CTRL,
+				"mmap iov copy out error\n");
+			return FI_EIO;
+		}
+		*total_len = ret;
 	}
+
 	*total_len = ret;
 	munmap(mapped_ptr, cmd->msg.hdr.size);
-	close(fd);
 	shm_unlink(shm_name);
+	close(fd);
 
 	return 0;
 }
@@ -546,6 +567,9 @@ static int smr_progress_cmd_rma(struct smr_ep *ep, struct smr_cmd *cmd)
 		break;
 	case smr_src_iov:
 		err = smr_progress_iov(cmd, iov, iov_count, &total_len, ep, ret);
+		break;
+	case smr_src_mmap:
+		err = smr_progress_mmap(cmd, iov, iov_count, &total_len, ep, ret);
 		break;
 	default:
 		FI_WARN(&smr_prov, FI_LOG_EP_CTRL,
