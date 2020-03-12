@@ -159,6 +159,7 @@ size_t rxr_rma_post_shm_write(struct rxr_ep *rxr_ep, struct rxr_tx_entry *tx_ent
 	struct rxr_pkt_entry *pkt_entry;
 	struct fi_msg_rma msg;
 	struct rxr_peer *peer;
+	int i;
 
 	assert(tx_entry->op == ofi_op_write);
 	peer = rxr_ep_get_peer(rxr_ep, tx_entry->addr);
@@ -171,6 +172,14 @@ size_t rxr_rma_post_shm_write(struct rxr_ep *rxr_ep, struct rxr_tx_entry *tx_ent
 	msg.msg_iov = tx_entry->iov;
 	msg.iov_count = tx_entry->iov_count;
 	msg.addr = peer->shm_fiaddr;
+	/*
+	 * If CMA is NOT available, FI_MR_VIRT_ADDR will be cleared in shm provider,
+	 * use 0-based offset for shm's RMA operation.
+	 */
+	for (i = 0; i < tx_entry->rma_iov_count; i++) {
+		tx_entry->rma_iov[i].addr = (efa_cma_cap) ?
+					    tx_entry->rma_iov[i].addr : 0;
+	}
 	msg.rma_iov = tx_entry->rma_iov;
 	msg.rma_iov_count = tx_entry->rma_iov_count;
 	msg.context = pkt_entry;

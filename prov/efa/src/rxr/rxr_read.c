@@ -155,7 +155,13 @@ struct rxr_read_entry *rxr_read_alloc_entry(struct rxr_ep *ep, int entry_type, v
 		}
 	} else {
 		assert(lower_ep_type == SHM_EP);
-		memset(read_entry->mr, 0, read_entry->iov_count * sizeof(struct fid_mr *));
+		/*
+		 * If CMA is NOT available, FI_MR_VIRT_ADDR will be cleared in shm provider,
+		 * use 0-based offset for shm's RMA operation.
+		 */
+		for (i = 0; i < read_entry->rma_iov_count; i++)
+			read_entry->rma_iov[i].addr = (efa_cma_cap) ?
+						      read_entry->rma_iov[i].addr : 0;
 	}
 
 	read_entry->lower_ep_type = lower_ep_type;
@@ -263,6 +269,7 @@ int rxr_read_post(struct rxr_ep *ep, struct rxr_read_entry *read_entry)
 		 */
 		if (read_entry->lower_ep_type == SHM_EP)
 			pkt_entry = rxr_pkt_entry_alloc(ep, ep->tx_pkt_shm_pool);
+
 		else
 			pkt_entry = rxr_pkt_entry_alloc(ep, ep->tx_pkt_efa_pool);
 
